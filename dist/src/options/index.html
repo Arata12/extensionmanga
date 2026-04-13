@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Manga Sync Options</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background:#0f172a; color:#fff; }
+      main { max-width: 980px; margin: 0 auto; padding: 28px 18px 40px; }
+      h1 { margin: 0 0 18px; font-size: 28px; }
+      h2 { margin: 0 0 10px; font-size: 18px; }
+      section { background:#111827; border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:18px; margin-bottom:16px; }
+      .muted { color: rgba(255,255,255,.68); }
+      .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+      .stack { display:grid; gap:10px; }
+      input[type="text"], textarea, select { width:100%; background:#0b1220; color:#fff; border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:10px 12px; }
+      textarea { min-height: 160px; resize: vertical; font-family: ui-monospace, monospace; }
+      button { appearance:none; border:none; background:#4f46e5; color:#fff; border-radius:10px; padding:10px 14px; font:600 13px system-ui,sans-serif; cursor:pointer; }
+      button.secondary { background:#334155; }
+      button.danger { background:#b91c1c; }
+      .chip { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:rgba(255,255,255,.08); font-size:12px; }
+      .list { display:grid; gap:10px; }
+      .card { border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:12px; background:#0b1220; }
+      .mono { font-family: ui-monospace, monospace; font-size:12px; }
+      .split { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+      @media (max-width: 760px) { .split { grid-template-columns: 1fr; } }
+    </style>
+    <script type="module" crossorigin src="/src/options/index.js"></script>
+    <link rel="modulepreload" crossorigin href="/metadata-parser.js">
+  </head>
+  <body>
+    <main>
+      <h1>Manga Sync Options</h1>
+      <section class="stack">
+        <h2>AniList</h2>
+        <div id="authStatus" class="muted">Checking AniList connection…</div>
+        <div class="row">
+          <button id="openLoginBtn">Open AniList pin login</button>
+          <button id="validateTokenBtn" class="secondary">Save token</button>
+          <button id="logoutBtn" class="danger">Log out</button>
+        </div>
+        <input id="tokenInput" type="text" placeholder="Paste AniList access token from the pin page" />
+        <div class="muted">Client ID: 39084 · Uses AniList pin auth flow.</div>
+      </section>
+
+      <section class="stack">
+        <h2>Settings</h2>
+        <label class="stack">
+          <span class="muted">Default sync mode</span>
+          <select id="syncModeSelect">
+            <option value="ask">Ask first</option>
+            <option value="automatic">Automatic</option>
+            <option value="manual">Manual only</option>
+          </select>
+        </label>
+        <div id="runtimeStatus" class="muted"></div>
+      </section>
+
+      <section class="stack">
+        <h2>Adapters</h2>
+        <div id="adapterList" class="list"></div>
+      </section>
+
+      <section class="stack">
+        <h2>Import custom adapter</h2>
+        <textarea id="adapterSourceInput" placeholder="Paste a custom adapter JS file here"></textarea>
+        <div class="row">
+          <button id="importAdapterBtn">Import adapter</button>
+          <label class="chip">
+            <input id="adapterFileInput" type="file" accept=".js,text/javascript" />
+            <span>Load from file</span>
+          </label>
+        </div>
+      </section>
+
+      <div class="split">
+        <section class="stack">
+          <h2>Learned mappings</h2>
+          <div id="mappingList" class="list"></div>
+        </section>
+        <section class="stack">
+          <h2>Debug</h2>
+          <div class="row">
+            <button id="debugSyncBtn">Sync this chapter now</button>
+            <button id="refreshBtn" class="secondary">Refresh view</button>
+          </div>
+          <div id="debugOutput" class="mono muted"></div>
+          <h2 style="margin-top:8px">Recent sync log</h2>
+          <div id="syncLogList" class="list"></div>
+        </section>
+      </div>
+    </main>
+  </body>
+  </html>

@@ -253,7 +253,7 @@ if (!window.__extmgBridgeActive) {
     return div.innerHTML;
   }
 
-  chrome.runtime.onMessage.addListener((message) => {
+  function handleRuntimeMessage(message: any): void {
     if (!message || typeof message !== 'object') return;
     if (message.type === 'UI_TOAST') {
       const payload = message.payload as { kind?: 'info' | 'success' | 'error'; message: string };
@@ -271,15 +271,16 @@ if (!window.__extmgBridgeActive) {
       state.context = message.context as ChapterContext;
       handleReadUi(message.ui);
     }
+  }
+
+  chrome.runtime.onMessage.addListener((message) => {
+    handleRuntimeMessage(message);
   });
 
   void chrome.runtime.sendMessage({ type: 'CONTENT_READY' }).then((response) => {
-    if (response?.ok && response.message) {
-      const message = response.message as { type: string; adapterId: string; context: ChapterContext; ui: unknown };
-      if (message.type === 'UI_DETECTION') {
-        state.adapterId = message.adapterId;
-        state.context = message.context;
-        handleDetectionUi(message.ui);
+    if (response?.ok && Array.isArray(response.messages)) {
+      for (const message of response.messages) {
+        handleRuntimeMessage(message);
       }
     }
   }).catch(() => {

@@ -1,6 +1,6 @@
 {
   "name": "manga-anilist-sync",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Manga sync extension to AniList",
   "type": "module",
   "scripts": {

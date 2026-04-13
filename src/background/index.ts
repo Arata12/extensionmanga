@@ -24,7 +24,7 @@ const bundledAdapters = new Map<string, AdapterSourceRecord>([
 ]);
 
 const tabSessions = new Map<number, TabSession>();
-const lastUiMessageByTab = new Map<number, Record<string, unknown>>();
+const pendingUiMessagesByTab = new Map<number, Array<Record<string, unknown>>>();
 let registrationPromise: Promise<void> | null = null;
 let lastRegistrationError: string | null = null;
 
@@ -293,18 +293,19 @@ function isSameChapterUrl(a: string | undefined, b: string | undefined): boolean
 
 async function sendUiMessage(tabId: number | undefined, message: Record<string, unknown>): Promise<void> {
   if (typeof tabId !== 'number') return;
-  lastUiMessageByTab.set(tabId, message);
   try {
     await chrome.tabs.sendMessage(tabId, message);
   } catch {
-    // Content script may not be ready yet.
+    const queued = pendingUiMessagesByTab.get(tabId) ?? [];
+    queued.push(message);
+    pendingUiMessagesByTab.set(tabId, queued.slice(-10));
   }
 }
 
 function clearTabState(tabId: number | undefined): void {
   if (typeof tabId !== 'number') return;
   tabSessions.delete(tabId);
-  lastUiMessageByTab.delete(tabId);
+  pendingUiMessagesByTab.delete(tabId);
 }
 
 async function handleUserScriptEvent(message: any, sender: chrome.runtime.MessageSender): Promise<void> {
@@ -587,17 +588,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (session && !isSameChapterUrl(session.context.chapterUrl, senderUrl)) {
             clearTabState(sender.tab.id);
           }
-          const lastUiMessage = lastUiMessageByTab.get(sender.tab.id);
-          if (!lastUiMessage) {
+          const pendingMessages = pendingUiMessagesByTab.get(sender.tab.id) ?? [];
+          if (!pendingMessages.length) {
             sendResponse({ ok: true });
             break;
           }
-          if ('context' in lastUiMessage && !isSameChapterUrl((lastUiMessage.context as ChapterContext | undefined)?.chapterUrl, senderUrl)) {
+          const validMessages = pendingMessages.filter((queuedMessage) => {
+            if (!('context' in queuedMessage)) return true;
+            return isSameChapterUrl((queuedMessage.context as ChapterContext | undefined)?.chapterUrl, senderUrl);
+          });
+          if (!validMessages.length) {
             clearTabState(sender.tab.id);
             sendResponse({ ok: true });
             break;
           }
-          sendResponse({ ok: true, message: lastUiMessage });
+          pendingUiMessagesByTab.delete(sender.tab.id);
+          sendResponse({ ok: true, messages: validMessages });
           break;
         }
         case 'CHOOSE_MATCH': {

@@ -223,7 +223,7 @@ if (!window.__extmgBridgeActive) {
         div.textContent = value;
         return div.innerHTML;
     }
-    chrome.runtime.onMessage.addListener((message) => {
+    function handleRuntimeMessage(message) {
         if (!message || typeof message !== 'object')
             return;
         if (message.type === 'UI_TOAST') {
@@ -242,14 +242,14 @@ if (!window.__extmgBridgeActive) {
             state.context = message.context;
             handleReadUi(message.ui);
         }
+    }
+    chrome.runtime.onMessage.addListener((message) => {
+        handleRuntimeMessage(message);
     });
     void chrome.runtime.sendMessage({ type: 'CONTENT_READY' }).then((response) => {
-        if (response?.ok && response.message) {
-            const message = response.message;
-            if (message.type === 'UI_DETECTION') {
-                state.adapterId = message.adapterId;
-                state.context = message.context;
-                handleDetectionUi(message.ui);
+        if (response?.ok && Array.isArray(response.messages)) {
+            for (const message of response.messages) {
+                handleRuntimeMessage(message);
             }
         }
     }).catch(() => {

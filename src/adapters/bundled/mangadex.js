@@ -113,7 +113,6 @@ MangaSync.defineAdapter({
       currentChapterRef = context.chapterId || context.chapterUrl;
       readSentFor = '';
       ctx.emitDetected(context);
-      ctx.showStatus({ kind: 'info', message: `Detected: ${context.siteSeriesTitle}${context.chapterNumber ? ` · Ch ${context.chapterNumber}` : ''}` });
       ctx.whenRead({ minSeconds: 15, minScrollPercent: 85 }, () => {
         if (readSentFor === nextKey) return;
         readSentFor = nextKey;

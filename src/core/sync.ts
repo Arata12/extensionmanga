@@ -2,6 +2,7 @@ import { fetchMediaWithEntry, saveMediaProgress, searchManga } from './anilist';
 import { isStrongMatch, normalizeTitle, rankCandidates } from './matcher';
 import { getSettings } from './storage';
 import {
+  deleteSeriesMapping,
   deleteSyncLogEntry,
   getSeriesMapping,
   getSyncLogEntry,
@@ -45,6 +46,32 @@ async function searchCandidatesForTitle(title: string) {
   return [];
 }
 
+async function findEquivalentMappings(record: Pick<SeriesMapping, 'site' | 'siteTitle' | 'anilistMediaId'>): Promise<SeriesMapping[]> {
+  const normalizedTitle = normalizeTitle(record.siteTitle);
+  const allMappings = await listSeriesMappings();
+  return allMappings.filter(
+    (mapping) =>
+      mapping.site === record.site &&
+      mapping.anilistMediaId === record.anilistMediaId &&
+      normalizeTitle(mapping.siteTitle) === normalizedTitle,
+  );
+}
+
+async function saveCanonicalMapping(mapping: SeriesMapping): Promise<SeriesMapping> {
+  const equivalents = await findEquivalentMappings(mapping);
+  const confirmedByUser = mapping.confirmedByUser || equivalents.some((item) => item.confirmedByUser);
+
+  for (const equivalent of equivalents) {
+    if (equivalent.key !== mapping.key) {
+      await deleteSeriesMapping(equivalent.key);
+    }
+  }
+
+  const canonicalMapping = { ...mapping, confirmedByUser };
+  await saveSeriesMapping(canonicalMapping);
+  return canonicalMapping;
+}
+
 export async function resolveSeries(context: ChapterContext): Promise<ResolutionResult> {
   const exact = await getSeriesMapping(context.site, context.siteSeriesId);
   if (exact) {
@@ -53,18 +80,30 @@ export async function resolveSeries(context: ChapterContext): Promise<Resolution
 
   const alias = await getTitleAlias(context.site, normalizeTitle(context.siteSeriesTitle));
   if (alias) {
-    const mapping: SeriesMapping = {
-      key: `${context.site}|${context.siteSeriesId}`,
+    const equivalents = await findEquivalentMappings({
       site: context.site,
-      siteSeriesId: context.siteSeriesId,
       siteTitle: context.siteSeriesTitle,
       anilistMediaId: alias.anilistMediaId,
-      anilistTitle: alias.anilistTitle,
-      confirmedByUser: false,
-      updatedAt: Date.now(),
+    });
+
+    const existing = equivalents.find((mapping) => mapping.confirmedByUser) ?? equivalents[0];
+    if (existing) {
+      return { state: 'mapped', mapping: existing };
+    }
+
+    return {
+      state: 'mapped',
+      mapping: {
+        key: `${context.site}|${context.siteSeriesId}`,
+        site: context.site,
+        siteSeriesId: context.siteSeriesId,
+        siteTitle: context.siteSeriesTitle,
+        anilistMediaId: alias.anilistMediaId,
+        anilistTitle: alias.anilistTitle,
+        confirmedByUser: false,
+        updatedAt: Date.now(),
+      },
     };
-    await saveSeriesMapping(mapping);
-    return { state: 'mapped', mapping };
   }
 
   const candidates = await searchCandidatesForTitle(context.siteSeriesTitle);
@@ -106,7 +145,7 @@ export async function buildDetectionUi(context: ChapterContext): Promise<Detecti
 }
 
 export async function confirmSeriesMapping(context: ChapterContext, candidate: MatchCandidate): Promise<SeriesMapping> {
-  const mapping: SeriesMapping = {
+  const mapping = await saveCanonicalMapping({
     key: `${context.site}|${context.siteSeriesId}`,
     site: context.site,
     siteSeriesId: context.siteSeriesId,
@@ -115,8 +154,7 @@ export async function confirmSeriesMapping(context: ChapterContext, candidate: M
     anilistTitle: candidate.title,
     confirmedByUser: true,
     updatedAt: Date.now(),
-  };
-  await saveSeriesMapping(mapping);
+  });
   await saveTitleAlias({
     key: `${context.site}|${normalizeTitle(context.siteSeriesTitle)}`,
     site: context.site,

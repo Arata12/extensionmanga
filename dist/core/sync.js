@@ -1,7 +1,7 @@
 import { fetchMediaWithEntry, saveMediaProgress, searchManga } from './anilist';
 import { isStrongMatch, normalizeTitle, rankCandidates } from './matcher';
 import { getSettings } from './storage';
-import { deleteSyncLogEntry, getSeriesMapping, getSyncLogEntry, getTitleAlias, listSeriesMappings, saveSeriesMapping, saveSyncLogEntry, saveTitleAlias, } from '../db/indexeddb';
+import { deleteSeriesMapping, deleteSyncLogEntry, getSeriesMapping, getSyncLogEntry, getTitleAlias, listSeriesMappings, saveSeriesMapping, saveSyncLogEntry, saveTitleAlias, } from '../db/indexeddb';
 function buildSearchQueries(title) {
     const trimmed = title.trim();
     const normalized = normalizeTitle(trimmed);
@@ -24,6 +24,25 @@ async function searchCandidatesForTitle(title) {
     }
     return [];
 }
+async function findEquivalentMappings(record) {
+    const normalizedTitle = normalizeTitle(record.siteTitle);
+    const allMappings = await listSeriesMappings();
+    return allMappings.filter((mapping) => mapping.site === record.site &&
+        mapping.anilistMediaId === record.anilistMediaId &&
+        normalizeTitle(mapping.siteTitle) === normalizedTitle);
+}
+async function saveCanonicalMapping(mapping) {
+    const equivalents = await findEquivalentMappings(mapping);
+    const confirmedByUser = mapping.confirmedByUser || equivalents.some((item) => item.confirmedByUser);
+    for (const equivalent of equivalents) {
+        if (equivalent.key !== mapping.key) {
+            await deleteSeriesMapping(equivalent.key);
+        }
+    }
+    const canonicalMapping = { ...mapping, confirmedByUser };
+    await saveSeriesMapping(canonicalMapping);
+    return canonicalMapping;
+}
 export async function resolveSeries(context) {
     const exact = await getSeriesMapping(context.site, context.siteSeriesId);
     if (exact) {
@@ -31,18 +50,28 @@ export async function resolveSeries(context) {
     }
     const alias = await getTitleAlias(context.site, normalizeTitle(context.siteSeriesTitle));
     if (alias) {
-        const mapping = {
-            key: `${context.site}|${context.siteSeriesId}`,
+        const equivalents = await findEquivalentMappings({
             site: context.site,
-            siteSeriesId: context.siteSeriesId,
             siteTitle: context.siteSeriesTitle,
             anilistMediaId: alias.anilistMediaId,
-            anilistTitle: alias.anilistTitle,
-            confirmedByUser: false,
-            updatedAt: Date.now(),
+        });
+        const existing = equivalents.find((mapping) => mapping.confirmedByUser) ?? equivalents[0];
+        if (existing) {
+            return { state: 'mapped', mapping: existing };
+        }
+        return {
+            state: 'mapped',
+            mapping: {
+                key: `${context.site}|${context.siteSeriesId}`,
+                site: context.site,
+                siteSeriesId: context.siteSeriesId,
+                siteTitle: context.siteSeriesTitle,
+                anilistMediaId: alias.anilistMediaId,
+                anilistTitle: alias.anilistTitle,
+                confirmedByUser: false,
+                updatedAt: Date.now(),
+            },
         };
-        await saveSeriesMapping(mapping);
-        return { state: 'mapped', mapping };
     }
     const candidates = await searchCandidatesForTitle(context.siteSeriesTitle);
     if (!candidates.length) {
@@ -78,7 +107,7 @@ export async function buildDetectionUi(context) {
     return { state: 'unresolved' };
 }
 export async function confirmSeriesMapping(context, candidate) {
-    const mapping = {
+    const mapping = await saveCanonicalMapping({
         key: `${context.site}|${context.siteSeriesId}`,
         site: context.site,
         siteSeriesId: context.siteSeriesId,
@@ -87,8 +116,7 @@ export async function confirmSeriesMapping(context, candidate) {
         anilistTitle: candidate.title,
         confirmedByUser: true,
         updatedAt: Date.now(),
-    };
-    await saveSeriesMapping(mapping);
+    });
     await saveTitleAlias({
         key: `${context.site}|${normalizeTitle(context.siteSeriesTitle)}`,
         site: context.site,

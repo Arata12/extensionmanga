@@ -16,6 +16,8 @@ MangaSync.defineAdapter({
     let readSentFor = '';
     let retryTimer = null;
     let readCleanup = null;
+    let detectToken = 0;
+    const chapterContextCache = new Map();
 
     const notifyCleared = () => {
       chrome.runtime.sendMessage({
@@ -65,7 +67,54 @@ MangaSync.defineAdapter({
       }) || null;
     };
 
-    const extract = () => {
+    const pickLocalizedTitle = (titleMap) => {
+      if (!titleMap || typeof titleMap !== 'object') return '';
+      return titleMap.en || titleMap['en-us'] || titleMap.ja || titleMap.jp || Object.values(titleMap)[0] || '';
+    };
+
+    const fetchChapterContext = async (chapterId, url) => {
+      if (chapterContextCache.has(chapterId)) {
+        return chapterContextCache.get(chapterId);
+      }
+
+      const request = fetch(`https://api.mangadex.org/chapter/${chapterId}?includes[]=manga`, {
+        credentials: 'omit',
+      })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload) => {
+          const chapter = payload?.data;
+          const chapterAttributes = chapter?.attributes;
+          const mangaRelationship = Array.isArray(chapter?.relationships)
+            ? chapter.relationships.find((relationship) => relationship.type === 'manga')
+            : null;
+          const mangaAttributes = mangaRelationship?.attributes;
+          const siteSeriesTitle = normalize(pickLocalizedTitle(mangaAttributes?.title));
+          const chapterNumberRaw = chapterAttributes?.chapter;
+          const parsedChapterNumber = chapterNumberRaw && /^\d+$/.test(String(chapterNumberRaw))
+            ? Number.parseInt(String(chapterNumberRaw), 10)
+            : null;
+
+          if (!mangaRelationship?.id || !siteSeriesTitle) {
+            return null;
+          }
+
+          return {
+            site: 'mangadex',
+            siteSeriesId: mangaRelationship.id,
+            siteSeriesTitle,
+            chapterId,
+            chapterNumber: parsedChapterNumber,
+            chapterTitle: normalize(chapterAttributes?.title) || undefined,
+            chapterUrl: url,
+          };
+        })
+        .catch(() => null);
+
+      chapterContextCache.set(chapterId, request);
+      return request;
+    };
+
+    const extractFromDom = () => {
       const url = location.href;
       const path = location.pathname;
       const chapterId =
@@ -113,6 +162,21 @@ MangaSync.defineAdapter({
       };
     };
 
+    const extract = async () => {
+      const url = location.href;
+      const chapterId =
+        (location.pathname.match(/\/chapter\/([^/?#]+)/i) || [])[1] ||
+        (url.match(/\/chapter\/([^/?#]+)/i) || [])[1];
+      if (!chapterId) return null;
+
+      const apiContext = await fetchChapterContext(chapterId, url);
+      if (apiContext) {
+        return apiContext;
+      }
+
+      return extractFromDom();
+    };
+
     const clearCurrentState = () => {
       if (retryTimer) {
         clearInterval(retryTimer);
@@ -127,8 +191,10 @@ MangaSync.defineAdapter({
       readSentFor = '';
     };
 
-    const detect = () => {
-      const context = extract();
+    const detect = async () => {
+      const token = ++detectToken;
+      const context = await extract();
+      if (token !== detectToken) return false;
       if (!context) return false;
       if (!context.siteSeriesTitle || context.siteSeriesTitle === 'Unknown title') return false;
       const nextKey = `${context.siteSeriesId}:${context.chapterId ?? context.chapterUrl}`;
@@ -152,8 +218,8 @@ MangaSync.defineAdapter({
 
     const scheduleRetries = () => {
       if (retryTimer) clearInterval(retryTimer);
-      retryTimer = setInterval(() => {
-        if (detect()) {
+      retryTimer = setInterval(async () => {
+        if (await detect()) {
           clearInterval(retryTimer);
           retryTimer = null;
         }
@@ -166,34 +232,34 @@ MangaSync.defineAdapter({
       }, 20000);
     };
 
-    if (!detect()) scheduleRetries();
+    void detect().then((detected) => {
+      if (!detected) scheduleRetries();
+    });
     ctx.onUrlChange(() => setTimeout(() => {
-      const latest = extract();
-      const nextChapterRef = latest ? (latest.chapterId || latest.chapterUrl) : '';
-      if (nextChapterRef && nextChapterRef === currentChapterRef) {
-        return;
-      }
       clearCurrentState();
-      if (!latest) {
+      if (!/\/chapter\//i.test(location.pathname)) {
         notifyCleared();
         return;
       }
-      if (!detect()) scheduleRetries();
+      void detect().then((detected) => {
+        if (!detected) scheduleRetries();
+      });
     }, 300));
     new MutationObserver(() => {
-      const latest = extract();
-      if (!latest && currentChapterRef) {
+      if (!/\/chapter\//i.test(location.pathname) && currentChapterRef) {
         clearCurrentState();
         notifyCleared();
         return;
       }
-      detect() || undefined;
+      void detect();
     }).observe(document.documentElement, {
       subtree: true,
       childList: true,
     });
     window.addEventListener('load', () => {
-      if (!detect()) scheduleRetries();
+      void detect().then((detected) => {
+        if (!detected) scheduleRetries();
+      });
     }, { once: true });
     window.addEventListener('pagehide', () => {
       clearCurrentState();

@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Manga Sync to AniList",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Track manga chapters on websites and sync progress to AniList.",
   "minimum_chrome_version": "120",
   "permissions": ["storage", "scripting", "tabs", "permissions", "webNavigation", "userScripts"],
-  "host_permissions": ["https://graphql.anilist.co/*", "https://anilist.co/*"],
+  "host_permissions": ["https://graphql.anilist.co/*", "https://anilist.co/*", "https://api.mangadex.org/*"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": {
     "service_worker": "src/background/index.ts",

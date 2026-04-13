@@ -288,6 +288,11 @@ async function handleUserScriptEvent(message, sender) {
         });
         return;
     }
+    if (message.eventType === 'chapter_cleared') {
+        clearTabState(sender.tab?.id);
+        await sendUiMessage(sender.tab?.id, { type: 'UI_CLEAR', adapterId });
+        return;
+    }
     if (message.eventType === 'chapter_detected') {
         const context = message.payload;
         storeTabSession(sender.tab?.id, adapterId, context);

@@ -255,6 +255,14 @@ if (!window.__extmgBridgeActive) {
 
   function handleRuntimeMessage(message: any): void {
     if (!message || typeof message !== 'object') return;
+    if (message.type === 'UI_CLEAR') {
+      state.adapterId = undefined;
+      state.context = undefined;
+      state.pendingCandidates = undefined;
+      state.pendingSync = false;
+      hideOverlay();
+      return;
+    }
     if (message.type === 'UI_TOAST') {
       const payload = message.payload as { kind?: 'info' | 'success' | 'error'; message: string };
       showToast(payload.message, payload.kind ?? 'info');

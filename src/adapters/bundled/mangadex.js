@@ -15,6 +15,16 @@ MangaSync.defineAdapter({
     let currentChapterRef = '';
     let readSentFor = '';
     let retryTimer = null;
+    let readCleanup = null;
+
+    const notifyCleared = () => {
+      chrome.runtime.sendMessage({
+        type: 'USER_SCRIPT_EVENT',
+        adapterId: 'mangadex',
+        eventType: 'chapter_cleared',
+        payload: null,
+      }).catch(() => {});
+    };
 
     const normalize = (value) => (value || '').trim();
     const normalizeKey = (value) => normalize(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -103,6 +113,20 @@ MangaSync.defineAdapter({
       };
     };
 
+    const clearCurrentState = () => {
+      if (retryTimer) {
+        clearInterval(retryTimer);
+        retryTimer = null;
+      }
+      if (readCleanup) {
+        readCleanup();
+        readCleanup = null;
+      }
+      currentKey = '';
+      currentChapterRef = '';
+      readSentFor = '';
+    };
+
     const detect = () => {
       const context = extract();
       if (!context) return false;
@@ -112,9 +136,13 @@ MangaSync.defineAdapter({
       currentKey = nextKey;
       currentChapterRef = context.chapterId || context.chapterUrl;
       readSentFor = '';
+      if (readCleanup) {
+        readCleanup();
+        readCleanup = null;
+      }
       ctx.emitDetected(context);
       ctx.showStatus({ kind: 'info', message: `Detected: ${context.siteSeriesTitle}${context.chapterNumber ? ` · Ch ${context.chapterNumber}` : ''}` });
-      ctx.whenRead({ minSeconds: 15, minScrollPercent: 85 }, () => {
+      readCleanup = ctx.whenRead({ minSeconds: 15, minScrollPercent: 85 }, () => {
         if (readSentFor === nextKey) return;
         readSentFor = nextKey;
         ctx.emitRead(context, { trigger: 'scroll-time-threshold' });
@@ -145,17 +173,31 @@ MangaSync.defineAdapter({
       if (nextChapterRef && nextChapterRef === currentChapterRef) {
         return;
       }
-      currentKey = '';
-      currentChapterRef = '';
-      readSentFor = '';
+      clearCurrentState();
+      if (!latest) {
+        notifyCleared();
+        return;
+      }
       if (!detect()) scheduleRetries();
     }, 300));
-    new MutationObserver(() => detect() || undefined).observe(document.documentElement, {
+    new MutationObserver(() => {
+      const latest = extract();
+      if (!latest && currentChapterRef) {
+        clearCurrentState();
+        notifyCleared();
+        return;
+      }
+      detect() || undefined;
+    }).observe(document.documentElement, {
       subtree: true,
       childList: true,
     });
     window.addEventListener('load', () => {
       if (!detect()) scheduleRetries();
     }, { once: true });
+    window.addEventListener('pagehide', () => {
+      clearCurrentState();
+      notifyCleared();
+    });
   },
 });

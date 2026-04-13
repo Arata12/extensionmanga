@@ -322,6 +322,12 @@ async function handleUserScriptEvent(message: any, sender: chrome.runtime.Messag
     return;
   }
 
+  if (message.eventType === 'chapter_cleared') {
+    clearTabState(sender.tab?.id);
+    await sendUiMessage(sender.tab?.id, { type: 'UI_CLEAR', adapterId });
+    return;
+  }
+
   if (message.eventType === 'chapter_detected') {
     const context = message.payload as ChapterContext;
     storeTabSession(sender.tab?.id, adapterId, context);

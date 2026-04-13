@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Manga Sync to AniList",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Track manga chapters on websites and sync progress to AniList.",
   "minimum_chrome_version": "120",
   "permissions": ["storage", "scripting", "tabs", "permissions", "webNavigation", "userScripts"],

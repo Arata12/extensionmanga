@@ -247,9 +247,12 @@ if (!window.__extmgBridgeActive) {
         handleRuntimeMessage(message);
     });
     void chrome.runtime.sendMessage({ type: 'CONTENT_READY' }).then((response) => {
-        if (response?.ok && Array.isArray(response.messages)) {
-            for (const message of response.messages) {
-                handleRuntimeMessage(message);
+        if (response?.ok && response.message) {
+            const message = response.message;
+            if (message.type === 'UI_DETECTION') {
+                state.adapterId = message.adapterId;
+                state.context = message.context;
+                handleDetectionUi(message.ui);
             }
         }
     }).catch(() => {

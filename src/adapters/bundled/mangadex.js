@@ -28,13 +28,13 @@ MangaSync.defineAdapter({
     const parseSeriesTitleFromMeta = () => {
       const ogTitle = getOgTitle();
       if (ogTitle) {
-        const match = ogTitle.match(/^(.*?)\s+-\s+Ch\.?\s*[^-]+(?:\s+-\s+MangaDex)?$/i);
+        const match = ogTitle.match(/^(.*?)\s+-\s+(?:Vol\.?\s*[^-]+\s+-\s+)?Ch\.?\s*[^-]+(?:\s+-\s+MangaDex)?$/i);
         if (match?.[1]) return normalize(match[1]);
         return normalize(ogTitle.replace(/\s*-\s*MangaDex.*$/i, ''));
       }
 
       const description = getDescription();
-      const descMatch = description.match(/^Read\s+(.+?)\s+Ch\.?\s*[^\s]+\s+on\s+MangaDex!?$/i);
+      const descMatch = description.match(/^Read\s+(.+?)\s+(?:Vol\.?\s*[^\s]+\s+)?Ch\.?\s*[^\s]+\s+on\s+MangaDex!?$/i);
       return descMatch?.[1] ? normalize(descMatch[1]) : '';
     };
 
@@ -66,13 +66,17 @@ MangaSync.defineAdapter({
       const titleLink = pickTitleLink();
       const titleHref = titleLink ? titleLink.getAttribute('href') || '' : '';
       const titleFromMeta = parseSeriesTitleFromMeta();
+      const description = getDescription();
+      const descriptionFallbackTitle = normalize(description.replace(/^Read\s+/i, '').replace(/\s+(?:Vol\.?\s*[^\s]+\s+)?Ch\.?\s*[^\s]+\s+on\s+MangaDex!?$/i, ''));
+      const fallbackTitle = titleFromMeta || descriptionFallbackTitle;
       const siteSeriesId =
         (titleHref.match(/\/title\/([a-f0-9-]+)/i) || [])[1] ||
-        (titleFromMeta ? `title:${normalizeKey(titleFromMeta)}` : 'unknown-series');
+        (fallbackTitle ? `title:${normalizeKey(fallbackTitle)}` : `chapter:${chapterId}`);
       const siteSeriesTitle =
-        titleFromMeta ||
+        fallbackTitle ||
         normalize(document.querySelector('main a[href*="/title/"] span')?.textContent) ||
         normalize(titleLink && titleLink.textContent) ||
+        descriptionFallbackTitle ||
         (document.querySelector('meta[property="og:title"]')?.getAttribute('content') || '').replace(/\s*-\s*MangaDex.*$/i, '') ||
         document.title.replace(/\s*-\s*MangaDex.*$/i, '').trim();
 
@@ -103,13 +107,13 @@ MangaSync.defineAdapter({
       const context = extract();
       if (!context) return false;
       if (!context.siteSeriesTitle || context.siteSeriesTitle === 'Unknown title') return false;
-      if (!context.siteSeriesId || context.siteSeriesId === 'unknown-series') return false;
       const nextKey = `${context.siteSeriesId}:${context.chapterId ?? context.chapterUrl}`;
       if (nextKey === currentKey) return true;
       currentKey = nextKey;
       currentChapterRef = context.chapterId || context.chapterUrl;
       readSentFor = '';
       ctx.emitDetected(context);
+      ctx.showStatus({ kind: 'info', message: `Detected: ${context.siteSeriesTitle}${context.chapterNumber ? ` · Ch ${context.chapterNumber}` : ''}` });
       ctx.whenRead({ minSeconds: 15, minScrollPercent: 85 }, () => {
         if (readSentFor === nextKey) return;
         readSentFor = nextKey;

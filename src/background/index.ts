@@ -25,6 +25,7 @@ const bundledAdapters = new Map<string, AdapterSourceRecord>([
 
 const tabSessions = new Map<number, TabSession>();
 const pendingUiMessagesByTab = new Map<number, Array<Record<string, unknown>>>();
+const readyTabs = new Set<number>();
 let registrationPromise: Promise<void> | null = null;
 let lastRegistrationError: string | null = null;
 
@@ -291,14 +292,24 @@ function isSameChapterUrl(a: string | undefined, b: string | undefined): boolean
   return Boolean(a && b && a === b);
 }
 
+function queueUiMessage(tabId: number, message: Record<string, unknown>): void {
+  const queued = pendingUiMessagesByTab.get(tabId) ?? [];
+  queued.push(message);
+  pendingUiMessagesByTab.set(tabId, queued.slice(-10));
+}
+
 async function sendUiMessage(tabId: number | undefined, message: Record<string, unknown>): Promise<void> {
   if (typeof tabId !== 'number') return;
+  if (!readyTabs.has(tabId)) {
+    queueUiMessage(tabId, message);
+    return;
+  }
+
   try {
     await chrome.tabs.sendMessage(tabId, message);
   } catch {
-    const queued = pendingUiMessagesByTab.get(tabId) ?? [];
-    queued.push(message);
-    pendingUiMessagesByTab.set(tabId, queued.slice(-10));
+    readyTabs.delete(tabId);
+    queueUiMessage(tabId, message);
   }
 }
 
@@ -306,6 +317,7 @@ function clearTabState(tabId: number | undefined): void {
   if (typeof tabId !== 'number') return;
   tabSessions.delete(tabId);
   pendingUiMessagesByTab.delete(tabId);
+  readyTabs.delete(tabId);
 }
 
 async function handleUserScriptEvent(message: any, sender: chrome.runtime.MessageSender): Promise<void> {
@@ -583,25 +595,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ ok: true });
             break;
           }
+          readyTabs.add(sender.tab.id);
           const senderUrl = getSenderUrl(sender);
           const session = tabSessions.get(sender.tab.id);
           if (session && !isSameChapterUrl(session.context.chapterUrl, senderUrl)) {
             clearTabState(sender.tab.id);
+            readyTabs.add(sender.tab.id);
           }
           const pendingMessages = pendingUiMessagesByTab.get(sender.tab.id) ?? [];
-          if (!pendingMessages.length) {
-            sendResponse({ ok: true });
-            break;
-          }
-          const validMessages = pendingMessages.filter((queuedMessage) => {
+          let validMessages = pendingMessages.filter((queuedMessage) => {
             if (!('context' in queuedMessage)) return true;
             return isSameChapterUrl((queuedMessage.context as ChapterContext | undefined)?.chapterUrl, senderUrl);
           });
+
+          if (!validMessages.length && session && isSameChapterUrl(session.context.chapterUrl, senderUrl)) {
+            const ui = await buildDetectionUi(session.context);
+            validMessages = [{ type: 'UI_DETECTION', adapterId: session.adapterId, context: session.context, ui }];
+          }
+
           if (!validMessages.length) {
-            clearTabState(sender.tab.id);
-            sendResponse({ ok: true });
+            sendResponse({ ok: true, messages: [] });
             break;
           }
+
           pendingUiMessagesByTab.delete(sender.tab.id);
           sendResponse({ ok: true, messages: validMessages });
           break;

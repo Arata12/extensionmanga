@@ -5,6 +5,7 @@ import {
   deleteSyncLogEntry,
   getSeriesMapping,
   getSyncLogEntry,
+  getTitleAlias,
   listSeriesMappings,
   saveSeriesMapping,
   saveSyncLogEntry,
@@ -36,7 +37,7 @@ async function searchCandidatesForTitle(title: string) {
   const queries = buildSearchQueries(title);
   for (const query of queries) {
     const results = await searchManga(query);
-    const candidates = rankCandidates(title, results);
+    const candidates = rankCandidates(query, results);
     if (candidates.length) {
       return candidates;
     }
@@ -48,6 +49,22 @@ export async function resolveSeries(context: ChapterContext): Promise<Resolution
   const exact = await getSeriesMapping(context.site, context.siteSeriesId);
   if (exact) {
     return { state: 'mapped', mapping: exact };
+  }
+
+  const alias = await getTitleAlias(context.site, normalizeTitle(context.siteSeriesTitle));
+  if (alias) {
+    const mapping: SeriesMapping = {
+      key: `${context.site}|${context.siteSeriesId}`,
+      site: context.site,
+      siteSeriesId: context.siteSeriesId,
+      siteTitle: context.siteSeriesTitle,
+      anilistMediaId: alias.anilistMediaId,
+      anilistTitle: alias.anilistTitle,
+      confirmedByUser: false,
+      updatedAt: Date.now(),
+    };
+    await saveSeriesMapping(mapping);
+    return { state: 'mapped', mapping };
   }
 
   const candidates = await searchCandidatesForTitle(context.siteSeriesTitle);
@@ -68,18 +85,23 @@ export async function buildDetectionUi(context: ChapterContext): Promise<Detecti
     return { state: 'auth_required' };
   }
 
-  const resolution = await resolveSeries(context);
-  if (resolution.state === 'mapped' && resolution.mapping) {
-    return {
-      state: 'mapped',
-      title: resolution.mapping.anilistTitle,
-      mediaId: resolution.mapping.anilistMediaId,
-      confirmed: resolution.mapping.confirmedByUser,
-    };
+  try {
+    const resolution = await resolveSeries(context);
+    if (resolution.state === 'mapped' && resolution.mapping) {
+      return {
+        state: 'mapped',
+        title: resolution.mapping.anilistTitle,
+        mediaId: resolution.mapping.anilistMediaId,
+        confirmed: resolution.mapping.confirmedByUser,
+      };
+    }
+    if (resolution.state === 'needs_choice') {
+      return { state: 'needs_choice', candidates: resolution.candidates ?? [] };
+    }
+  } catch (error) {
+    return { state: 'invalid', message: error instanceof Error ? error.message : String(error) };
   }
-  if (resolution.state === 'needs_choice') {
-    return { state: 'needs_choice', candidates: resolution.candidates ?? [] };
-  }
+
   return { state: 'unresolved' };
 }
 

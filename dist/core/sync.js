@@ -1,7 +1,7 @@
 import { fetchMediaWithEntry, saveMediaProgress, searchManga } from './anilist';
 import { isStrongMatch, normalizeTitle, rankCandidates } from './matcher';
 import { getSettings } from './storage';
-import { deleteSyncLogEntry, getSeriesMapping, getSyncLogEntry, listSeriesMappings, saveSeriesMapping, saveSyncLogEntry, saveTitleAlias, } from '../db/indexeddb';
+import { deleteSyncLogEntry, getSeriesMapping, getSyncLogEntry, getTitleAlias, listSeriesMappings, saveSeriesMapping, saveSyncLogEntry, saveTitleAlias, } from '../db/indexeddb';
 function buildSearchQueries(title) {
     const trimmed = title.trim();
     const normalized = normalizeTitle(trimmed);
@@ -17,7 +17,7 @@ async function searchCandidatesForTitle(title) {
     const queries = buildSearchQueries(title);
     for (const query of queries) {
         const results = await searchManga(query);
-        const candidates = rankCandidates(title, results);
+        const candidates = rankCandidates(query, results);
         if (candidates.length) {
             return candidates;
         }
@@ -28,6 +28,21 @@ export async function resolveSeries(context) {
     const exact = await getSeriesMapping(context.site, context.siteSeriesId);
     if (exact) {
         return { state: 'mapped', mapping: exact };
+    }
+    const alias = await getTitleAlias(context.site, normalizeTitle(context.siteSeriesTitle));
+    if (alias) {
+        const mapping = {
+            key: `${context.site}|${context.siteSeriesId}`,
+            site: context.site,
+            siteSeriesId: context.siteSeriesId,
+            siteTitle: context.siteSeriesTitle,
+            anilistMediaId: alias.anilistMediaId,
+            anilistTitle: alias.anilistTitle,
+            confirmedByUser: false,
+            updatedAt: Date.now(),
+        };
+        await saveSeriesMapping(mapping);
+        return { state: 'mapped', mapping };
     }
     const candidates = await searchCandidatesForTitle(context.siteSeriesTitle);
     if (!candidates.length) {
@@ -43,17 +58,22 @@ export async function buildDetectionUi(context) {
     if (!settings.authToken) {
         return { state: 'auth_required' };
     }
-    const resolution = await resolveSeries(context);
-    if (resolution.state === 'mapped' && resolution.mapping) {
-        return {
-            state: 'mapped',
-            title: resolution.mapping.anilistTitle,
-            mediaId: resolution.mapping.anilistMediaId,
-            confirmed: resolution.mapping.confirmedByUser,
-        };
+    try {
+        const resolution = await resolveSeries(context);
+        if (resolution.state === 'mapped' && resolution.mapping) {
+            return {
+                state: 'mapped',
+                title: resolution.mapping.anilistTitle,
+                mediaId: resolution.mapping.anilistMediaId,
+                confirmed: resolution.mapping.confirmedByUser,
+            };
+        }
+        if (resolution.state === 'needs_choice') {
+            return { state: 'needs_choice', candidates: resolution.candidates ?? [] };
+        }
     }
-    if (resolution.state === 'needs_choice') {
-        return { state: 'needs_choice', candidates: resolution.candidates ?? [] };
+    catch (error) {
+        return { state: 'invalid', message: error instanceof Error ? error.message : String(error) };
     }
     return { state: 'unresolved' };
 }
